@@ -1,81 +1,81 @@
 const express = require('express');
-const ruta = require('ruta');
+const path = require('path');
 const app = express();
-const PUERTO = proceso.env.PUERTO || 3000;
+const PORT = process.env.PORT || 3000;
 const ADMIN_PASS = process.env.ADMIN_PASS || '238911';
 const MONGO_URI = process.env.MONGO_URI || '';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── BASE DE DATOS ───────────────────────────────────────────────────────────────
-let col = null; // colección de participantes
-let resCol = null; // colección de resultados
+// ── DATABASE ──────────────────────────────────────────────────────────────────
+let col = null; // participants collection
+let resCol = null; // results collection
 
-función asíncrona initDB() {
-  if (!MONGO_URI) { console.log('Sin MONGO_URI — datos en memoria'); devolver; }
-  intentar {
+async function initDB() {
+  if (!MONGO_URI) { console.log('Sin MONGO_URI — datos en memoria'); return; }
+  try {
     const { MongoClient } = require('mongodb');
     const client = new MongoClient(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
-    esperar cliente.connect();
+    await client.connect();
     const db = client.db('quiniela2026');
-    col = db.collection('participantes');
+    col = db.collection('participants');
     resCol = db.collection('results');
     await col.createIndex({ key: 1 }, { unique: true });
     console.log('MongoDB OK');
-  } capturar (e) {
-    console.error('Error de MongoDB:', e.message);
+  } catch (e) {
+    console.error('MongoDB error:', e.message);
     col = null; resCol = null;
   }
 }
 
-// Alternativa en memoria
-const memParticipantes = {};
+// In-memory fallback
+const memParticipants = {};
 let memResults = {};
 
 function normKey(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40); }
 
-función asíncrona getParticipant(clave) {
-  si (col) {
+async function getParticipant(key) {
+  if (col) {
     const doc = await col.findOne({ key });
-    devolver documento || nulo;
+    return doc || null;
   }
-  devolver memParticipantes[clave] || null;
+  return memParticipants[key] || null;
 }
 
-función asíncrona upsertParticipant(clave, datos) {
-  si (col) {
+async function upsertParticipant(key, data) {
+  if (col) {
     await col.replaceOne({ key }, { key, ...data }, { upsert: true });
-  } demás {
-    memParticipantes[clave] = datos;
+  } else {
+    memParticipants[key] = data;
   }
 }
 
-función asíncrona getAllParticipants() {
-  si (col) {
+async function getAllParticipants() {
+  if (col) {
     return col.find({}).toArray();
   }
-  devolver Object.values(memParticipants);
+  return Object.values(memParticipants);
 }
 
-función asíncrona getResults() {
-  si (resCol) {
+async function getResults() {
+  if (resCol) {
     const doc = await resCol.findOne({ _id: 'main' });
-    devolver doc ? doc.data : {};
+    return doc ? doc.data : {};
   }
-  devolver resultados de memoria;
+  return memResults;
 }
 
-función asíncrona saveResults(data) {
-  si (resCol) {
+async function saveResults(data) {
+  if (resCol) {
     await resCol.replaceOne({ _id: 'main' }, { _id: 'main', data }, { upsert: true });
-  } demás {
-    memResults = datos;
+  } else {
+    memResults = data;
   }
 }
 
-// ── DATOS DE COINCIDENCIA ─────────────────────────────────────────────────────────────
-const GRUPOS = [
+// ── MATCH DATA ────────────────────────────────────────────────────────────────
+const GROUPS = [
   {g:"A",t:"México · Corea del Sur · Sudáfrica · Chequia",m:[
     {h:"México",hf:"🇲🇽",a:"Sudáfrica",af:"🇿🇦",j:1,d:"11 Jun",hr:"17:00"},
     {h:"Corea del Sur",hf:"🇰🇷",a:"Chequia",af:"🇨🇿",j:1,d:"11 Jun",hr:"20:00"},
@@ -92,11 +92,11 @@ const GRUPOS = [
     {h:"Suiza",hf:"🇨🇭",a:"Bosnia",af:"🇧🇦",j:3,d:"20 Jun",hr:"20:00"}]},
   {g:"C",t:"Brasil · Marruecos · Escocia · Haití",m:[
     {h:"Brasil",hf:"🇧🇷",a:"Marruecos",af:"🇲🇦",j:1,d:"12 Jun",hr:"20:00"},
-    {h:"Escocia",hf:"🏴ڠڠڠڠڠڠ",a:"Haití",af:"🇭🇹",j:1,d:"13 Jun",hr:"14:00"},
-    {h:"Brasil",hf:"🇧🇷",a:"Escocia",af:"🏴ceived
+    {h:"Escocia",hf:"🏴󠁧󠁢󠁳󠁣󠁴󠁿",a:"Haití",af:"🇭🇹",j:1,d:"13 Jun",hr:"14:00"},
+    {h:"Brasil",hf:"🇧🇷",a:"Escocia",af:"🏴󠁧󠁢󠁳󠁣󠁴󠁿",j:2,d:"17 Jun",hr:"14:00"},
     {h:"Marruecos",hf:"🇲🇦",a:"Haití",af:"🇭🇹",j:2,d:"17 Jun",hr:"17:00"},
     {h:"Brasil",hf:"🇧🇷",a:"Haití",af:"🇭🇹",j:3,d:"21 Jun",hr:"20:00"},
-    {h:"Marruecos",hf:"🇲🇦",a:"Escocia",af:"🏴ceived
+    {h:"Marruecos",hf:"🇲🇦",a:"Escocia",af:"🏴󠁧󠁢󠁳󠁣󠁴󠁿",j:3,d:"21 Jun",hr:"20:00"}]},
   {g:"D",t:"EE.UU. · Paraguay · Australia · Turquía",m:[
     {h:"EE.UU.",hf:"🇺🇸",a:"Paraguay",af:"🇵🇾",j:1,d:"13 Jun",hr:"17:00"},
     {h:"Australia",hf:"🇦🇺",a:"Turquía",af:"🇹🇷",j:1,d:"13 Jun",hr:"20:00"},
@@ -136,7 +136,7 @@ const GRUPOS = [
     {h:"Francia",hf:"🇫🇷",a:"Senegal",af:"🇸🇳",j:1,d:"16 Jun",hr:"20:00"},
     {h:"Noruega",hf:"🇳🇴",a:"Irak",af:"🇮🇶",j:1,d:"17 Jun",hr:"14:00"},
     {h:"Francia",hf:"🇫🇷",a:"Noruega",af:"🇳🇴",j:2,d:"21 Jun",hr:"14:00"},
-    {h:"Senegal",hf:"🇸🇳",a:"Irak",af:"🇮🇶",j:2,d:"21 de junio",hr:"17:00"},
+    {h:"Senegal",hf:"🇸🇳",a:"Irak",af:"🇮🇶",j:2,d:"21 Jun",hr:"17:00"},
     {h:"Francia",hf:"🇫🇷",a:"Irak",af:"🇮🇶",j:3,d:"25 Jun",hr:"20:00"},
     {h:"Senegal",hf:"🇸🇳",a:"Noruega",af:"🇳🇴",j:3,d:"25 Jun",hr:"20:00"}]},
   {g:"J",t:"Argentina · Austria · Argelia · Jordania",m:[
@@ -146,7 +146,7 @@ const GRUPOS = [
     {h:"Argelia",hf:"🇩🇿",a:"Jordania",af:"🇯🇴",j:2,d:"22 Jun",hr:"17:00"},
     {h:"Argentina",hf:"🇦🇷",a:"Argelia",af:"🇩🇿",j:3,d:"26 Jun",hr:"20:00"},
     {h:"Austria",hf:"🇦🇹",a:"Jordania",af:"🇯🇴",j:3,d:"26 Jun",hr:"20:00"}]},
-  {g:"K",t:"Portugal · Colombia · Uzbekistán · RD Congo",m:[
+  {g:"K",t:"Portugal · Colombia · Uzbekistán · Congo RD",m:[
     {h:"Portugal",hf:"🇵🇹",a:"Colombia",af:"🇨🇴",j:1,d:"18 Jun",hr:"20:00"},
     {h:"Uzbekistán",hf:"🇺🇿",a:"Congo RD",af:"🇨🇩",j:1,d:"19 Jun",hr:"14:00"},
     {h:"Portugal",hf:"🇵🇹",a:"Uzbekistán",af:"🇺🇿",j:2,d:"23 Jun",hr:"14:00"},
@@ -154,29 +154,29 @@ const GRUPOS = [
     {h:"Portugal",hf:"🇵🇹",a:"Congo RD",af:"🇨🇩",j:3,d:"27 Jun",hr:"20:00"},
     {h:"Colombia",hf:"🇨🇴",a:"Uzbekistán",af:"🇺🇿",j:3,d:"27 Jun",hr:"20:00"}]},
   {g:"L",t:"Inglaterra · Croacia · Panamá · Ghana",m:[
-    {h:"Inglaterra",hf:"🏴ڠڠڠڠڠڠ",a:"Croacia",af:"🇭🇷",j:1,d:"20 Jun",hr:"14:00"},
+    {h:"Inglaterra",hf:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",a:"Croacia",af:"🇭🇷",j:1,d:"20 Jun",hr:"14:00"},
     {h:"Panamá",hf:"🇵🇦",a:"Ghana",af:"🇬🇭",j:1,d:"20 Jun",hr:"17:00"},
-    {h:"Inglaterra",hf:"🏴ڠڠڠڠڠڠ",a:"Panamá",af:"🇵🇦",j:2,d:"24 Jun",hr:"14:00"},
-    {h:"Croacia",hf:"🇭🇷",a:"Ghana",af:"🇬🇭",j:2,d:"24 junio",hr:"17:00"},
-    {h:"Inglaterra",hf:"🏴ڠڠڠڠڠڠ",a:"Ghana",af:"🇬🇭",j:3,d:"28 Jun",hr:"20:00"},
+    {h:"Inglaterra",hf:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",a:"Panamá",af:"🇵🇦",j:2,d:"24 Jun",hr:"14:00"},
+    {h:"Croacia",hf:"🇭🇷",a:"Ghana",af:"🇬🇭",j:2,d:"24 Jun",hr:"17:00"},
+    {h:"Inglaterra",hf:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",a:"Ghana",af:"🇬🇭",j:3,d:"28 Jun",hr:"20:00"},
     {h:"Croacia",hf:"🇭🇷",a:"Panamá",af:"🇵🇦",j:3,d:"28 Jun",hr:"20:00"}]}
 ];
 
-const TODOS_LOS_COINCIDENCIAS = [];
-GRUPOS.forEach(g => gmforEach((m, i) => TODOS_COINCIDENCIAS.push({ ...m, id: gg + i })));
+const ALL_MATCHES = [];
+GROUPS.forEach(g => g.m.forEach((m, i) => ALL_MATCHES.push({ ...m, id: g.g + i })));
 
-función calcPts(pred, res) {
-  Si (!pred || !res) devuelve null;
-  Si (pred.h === '' || pred.h == null || pred.a === '' || pred.a == null) devolver null;
-  Si (res.h === '' || res.h == null || res.a === '' || res.a == null) devolver null;
+function calcPts(pred, res) {
+  if (!pred || !res) return null;
+  if (pred.h === '' || pred.h == null || pred.a === '' || pred.a == null) return null;
+  if (res.h === '' || res.h == null || res.a === '' || res.a == null) return null;
   const ph = +pred.h, pa = +pred.a, rh = +res.h, ra = +res.a;
-  si (isNaN(ph)||isNaN(pa)||isNaN(rh)||isNaN(ra)) devuelve nulo;
-  si (ph===rh && pa===ra) devolver 3;
+  if (isNaN(ph)||isNaN(pa)||isNaN(rh)||isNaN(ra)) return null;
+  if (ph===rh && pa===ra) return 3;
   const r = (a,b) => a>b?'H':a<b?'A':'E';
-  devolver r(ph,pa)===r(rh,ra) ? 1 : 0;
+  return r(ph,pa)===r(rh,ra) ? 1 : 0;
 }
 
-// ── RUTAS ────────────────────────────────────────────────────────────────
+// ── ROUTES ────────────────────────────────────────────────────────────────────
 
 app.get('/api/matches', (req, res) => res.json(GROUPS));
 
@@ -186,40 +186,40 @@ app.get('/api/health', async (req, res) => {
   res.json({ ok:true, db: col?'MongoDB':'memory', participants:all.length, results:Object.keys(rez).length });
 });
 
-// Comprobar si el nombre existe
+// Check if name exists
 app.get('/api/check/:name', async (req, res) => {
-  intentar {
+  try {
     const key = normKey(req.params.name);
     const p = await getParticipant(key);
     res.json({ exists: !!p, createdAt: p ? p.createdAt : null });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Registrar nuevo participante con PIN
+// Register new participant with PIN
 app.post('/api/register', async (req, res) => {
-  intentar {
-    const { nombre, pin } = req.body;
-    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Nombre requerido' });
+  try {
+    const { name, pin } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Nombre requerido' });
     if (!pin || !/^\d{5}$/.test(pin)) return res.status(400).json({ error: 'PIN debe ser de 5 dígitos' });
     const key = normKey(name.trim());
-    const existente = esperar obtenerParticipante(clave);
-    if (existente) return res.status(409).json({ error: 'Ese nombre ya está registrado', creadoAt: existiendo.createdAt });
+    const existing = await getParticipant(key);
+    if (existing) return res.status(409).json({ error: 'Ese nombre ya está registrado', createdAt: existing.createdAt });
     const newP = {
-      nombre: nombre.trim(),
-      alfiler,
-      predicciones: {},
-      creadoEn: nuevo Date().toISOString(),
-      guardadoEn: new Date().toISOString()
+      name: name.trim(),
+      pin,
+      predictions: {},
+      createdAt: new Date().toISOString(),
+      savedAt: new Date().toISOString()
     };
-    esperar upsertParticipant(clave, nuevoP);
+    await upsertParticipant(key, newP);
     res.json({ ok: true, key });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Iniciar sesión con nombre + PIN
+// Login with name + PIN
 app.post('/api/login', async (req, res) => {
-  intentar {
-    const { nombre, pin } = req.body;
+  try {
+    const { name, pin } = req.body;
     if (!name || !pin) return res.status(400).json({ error: 'Nombre y PIN requeridos' });
     const key = normKey(name.trim());
     const p = await getParticipant(key);
@@ -230,84 +230,84 @@ app.post('/api/login', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Guardar predicciones (requiere verificación mediante PIN)
+// Save predictions (requires PIN verification)
 app.post('/api/save', async (req, res) => {
-  intentar {
-    const { nombre, pin, predicciones } = req.body;
+  try {
+    const { name, pin, predictions } = req.body;
     if (!name || !pin) return res.status(400).json({ error: 'Nombre y PIN requeridos' });
     const key = normKey(name.trim());
     const p = await getParticipant(key);
     if (!p) return res.status(404).json({ error: 'Participante no encontrado' });
     if (p.pin !== pin) return res.status(401).json({ error: 'PIN incorrecto' });
 
-    // Fusionar predicciones: nunca sobrescribir bloqueado
-    const fusionado = { ...p.predicciones };
-    si (predicciones && tipo de predicciones === 'objeto') {
-      Objeto.claves(predicciones).paraCada(id => {
-        si (!merged[id] || !merged[id].locked) {
-          fusionado[id] = predicciones[id];
+    // Merge predictions — never overwrite locked
+    const merged = { ...p.predictions };
+    if (predictions && typeof predictions === 'object') {
+      Object.keys(predictions).forEach(id => {
+        if (!merged[id] || !merged[id].locked) {
+          merged[id] = predictions[id];
         }
       });
     }
 
-    esperar upsertParticipant(clave, {
-      ...pag,
-      predicciones: fusionadas,
-      guardadoEn: new Date().toISOString()
+    await upsertParticipant(key, {
+      ...p,
+      predictions: merged,
+      savedAt: new Date().toISOString()
     });
 
     const locked = Object.values(merged).filter(x => x && x.locked).length;
-    const filled = Object.values(merged).filter(x => x && xh !== '' && xa !== '').length;
+    const filled = Object.values(merged).filter(x => x && x.h !== '' && x.a !== '').length;
     res.json({ ok: true, filled, locked });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Clasificación (pública)
+// Leaderboard (public)
 app.get('/api/leaderboard', async (req, res) => {
-  intentar {
+  try {
     const all = await getAllParticipants();
     const rez = await getResults();
-    const filas = all.map(p => {
+    const rows = all.map(p => {
       const preds = p.predictions || {};
-      sea ​​pts=0, exacto=0, lleno=0, bloqueado=0;
-      TODOS_LOS_COINCIDENCIAS.paraCada(m => {
+      let pts=0, exact=0, filled=0, locked=0;
+      ALL_MATCHES.forEach(m => {
         const pred = preds[m.id];
         const r = rez[m.id];
-        si (pred && pred.h!=='' && pred.a!=='') lleno++;
-        si (pred && pred.locked) bloqueado++;
+        if (pred && pred.h!=='' && pred.a!=='') filled++;
+        if (pred && pred.locked) locked++;
         const pt = calcPts(pred, r);
         if (pt !== null) { pts += pt; if (pt===3) exact++; }
       });
       return { name: p.name, pts, exact, filled, locked, savedAt: p.savedAt };
     });
-    filas.ordenar((a,b) => b.pts-a.pts || b.exact-a.exact || b.locked-a.locked);
-    res.json({ filas, resultsCount: Object.keys(rez).length });
+    rows.sort((a,b) => b.pts-a.pts || b.exact-a.exact || b.locked-a.locked);
+    res.json({ rows, resultsCount: Object.keys(rez).length });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Administrador: verificar contraseña
+// Admin: verify password
 app.post('/api/admin-verify', (req, res) => {
   res.json({ ok: req.body.password === ADMIN_PASS });
 });
 
-// Administrador: obtener todos los datos
+// Admin: get all data
 app.get('/api/admin/data', async (req, res) => {
   const auth = req.headers['x-admin-pass'];
   if (auth !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
-  intentar {
+  try {
     const all = await getAllParticipants();
     const rez = await getResults();
     const safe = all.map(({ pin, ...rest }) => rest);
-    res.json({ participantes: seguro, resultados: rez });
+    res.json({ participants: safe, results: rez });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Administrador: guardar resultados oficiales
+// Admin: save official results
 app.post('/api/results', async (req, res) => {
-  const { contraseña, resultados: nuevosResultados } = req.body;
+  const { password, results: newResults } = req.body;
   if (password !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
-  intentar {
-    esperar a guardarResultados(nuevosResultados || {});
+  try {
+    await saveResults(newResults || {});
     res.json({ ok: true, count: Object.keys(newResults||{}).length });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
