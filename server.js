@@ -319,3 +319,7 @@ app.get('*', (req, res) => {
 initDB().then(() => {
   app.listen(PORT, () => console.log(`Quiniela Doña Corneta — puerto ${PORT} — DB: ${col?'MongoDB':'memoria'}`));
 });
+// temp debug
+app.get('/api/debug-admin', (req, res) => {
+  res.json({ pass: ADMIN_PASS, env: process.env.ADMIN_PASS });
+});
