@@ -323,3 +323,4 @@ initDB().then(() => {
 app.get('/api/debug-admin', (req, res) => {
   res.json({ pass: ADMIN_PASS, env: process.env.ADMIN_PASS });
 });
+// miércoles,  3 de junio de 2026, 11:32:34 EST
