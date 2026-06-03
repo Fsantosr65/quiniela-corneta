@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
-const ADMIN_PASS = process.env.ADMIN_PASS || 'corneta2026';
+const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
 const MONGO_URI = process.env.MONGO_URI || '';
 
 app.use(express.json());
