@@ -311,3 +311,10 @@ app.listen(PORT, async () => {
   await connectDB();
   console.log(`Server running on port ${PORT}`);
 });
+
+// Admin: reset all participants
+app.post('/api/admin/reset', async (req, res) => {
+  if (req.body.password !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
+  await setData({ participants: {}, results: {}, knockoutResults: {}, knockoutMatches: {} });
+  res.json({ ok: true });
+});
