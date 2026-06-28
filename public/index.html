@@ -89,7 +89,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <div class="tabs">
   <button class="tab active" onclick="showTab('login')">🏠 Inicio</button>
-  <button class="tab" onclick="showTab('groups')">📋 Grupos</button>
+  
   <button class="tab" onclick="showTab('knockout')">🏆 Eliminatorias</button>
   <button class="tab" onclick="showTab('table')">📊 Tabla</button>
   <button class="tab" onclick="showTab('admin')">🔒 Admin</button>
@@ -128,8 +128,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
 </div>
 
-<div id="tab-groups" class="section">
-  <div id="groups-content"><p class="spinner">Inicia sesión para ver tus predicciones</p></div>
 </div>
 
 <div id="tab-knockout" class="section">
@@ -206,7 +204,7 @@ function showTab(t) {
   document.querySelectorAll('.tab,.section').forEach(e=>e.classList.remove('active'));
   document.querySelector(`[onclick="showTab('${t}')"]`).classList.add('active');
   document.getElementById('tab-'+t).classList.add('active');
-  if(t==='groups' && currentUser) renderGroups();
+  
   if(t==='knockout' && currentUser) renderKnockout();
   if(t==='table') loadTable();
 }
@@ -327,17 +325,6 @@ function logout(){
 }
 
 // ── Groups ────────────────────────────────────────────────────────────────────
-function renderGroups() {
-  if(!currentUser){document.getElementById('groups-content').innerHTML='<p class="spinner">Inicia sesión primero</p>';return;}
-  const groups = {};
-  allMatches.groups.forEach(m=>{if(!groups[m.group])groups[m.group]=[];groups[m.group].push(m);});
-  let html='';
-  for(const [g, matches] of Object.entries(groups)){
-    html+=`<div class="round-title">Grupo ${g}</div>`;
-    matches.forEach(m=>{ html+=renderMatchRow(m,'group'); });
-  }
-  document.getElementById('groups-content').innerHTML=html;
-}
 
 function renderMatchRow(m, type) {
   const pred = type==='group' ? groupPredictions[m.id] : koPredictions[m.id];
@@ -379,11 +366,10 @@ async function lockMatch(id, type) {
   else{koPredictions[id]=pred;koLocked[id]=true;}
   // Save immediately
   try {
-    if(type==='group') await api('POST','/api/save',{name:currentUser,pin:currentPin,predictions:groupPredictions,locked:groupLocked});
-    else await api('POST','/api/save-knockout',{name:currentUser,pin:currentPin,knockoutPredictions:koPredictions,knockoutLocked:koLocked});
+    await api('POST','/api/save-knockout',{name:currentUser,pin:currentPin,knockoutPredictions:koPredictions,knockoutLocked:koLocked});
     toast('✅ Guardado');
   } catch(e){toast('Error al guardar','err');}
-  if(type==='group') renderGroups(); else renderKnockout();
+  renderKnockout();
 }
 
 // ── Knockout ──────────────────────────────────────────────────────────────────
