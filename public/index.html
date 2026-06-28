@@ -425,7 +425,7 @@ async function adminLogin() {
 
 async function loadAdmin() {
   try {
-    const data = await api('GET','/api/admin/data',null);
+    const data = await fetch('/api/admin/data',{headers:{'x-admin-pass':adminPass,'Content-Type':'application/json'}}).then(r=>r.json());
     // Participants
     const scores = data.scores || {};
     let pHtml=`<table class="scores-table"><tr><th>Nombre</th><th>Grupos</th><th>Elim.</th><th>Total</th><th>Estado</th></tr>`;
