@@ -8,319 +8,306 @@ const MONGO_URI = process.env.MONGO_URI || '';
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── DATABASE ──────────────────────────────────────────────────────────────────
-let col = null; // participants collection
-let resCol = null; // results collection
-
-async function initDB() {
-  if (!MONGO_URI) { console.log('Sin MONGO_URI — datos en memoria'); return; }
+// ── MongoDB ──────────────────────────────────────────────────────────────────
+let db = null;
+async function connectDB() {
+  if (!MONGO_URI) return;
   try {
     const { MongoClient } = require('mongodb');
     const client = new MongoClient(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
     await client.connect();
-    const db = client.db('quiniela2026');
-    col = db.collection('participants');
-    resCol = db.collection('results');
-    await col.createIndex({ key: 1 }, { unique: true });
-    console.log('MongoDB OK');
+    db = client.db('quiniela');
+    console.log('MongoDB conectado');
   } catch (e) {
     console.error('MongoDB error:', e.message);
-    col = null; resCol = null;
   }
 }
 
-// In-memory fallback
-const memParticipants = {};
-let memResults = {};
+// ── Data helpers ─────────────────────────────────────────────────────────────
+const memData = { participants: {}, results: {}, knockoutResults: {}, knockoutMatches: {} };
 
-function normKey(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40); }
-
-async function getParticipant(key) {
-  if (col) {
-    const doc = await col.findOne({ key });
-    return doc || null;
-  }
-  return memParticipants[key] || null;
+async function getData() {
+  if (!db) return memData;
+  const doc = await db.collection('state').findOne({ _id: 'main' });
+  return doc || { participants: {}, results: {}, knockoutResults: {}, knockoutMatches: {} };
 }
 
-async function upsertParticipant(key, data) {
-  if (col) {
-    await col.replaceOne({ key }, { key, ...data }, { upsert: true });
-  } else {
-    memParticipants[key] = data;
-  }
+async function setData(data) {
+  if (!db) { Object.assign(memData, data); return; }
+  await db.collection('state').updateOne(
+    { _id: 'main' },
+    { $set: data },
+    { upsert: true }
+  );
 }
 
-async function getAllParticipants() {
-  if (col) {
-    return col.find({}).toArray();
-  }
-  return Object.values(memParticipants);
-}
-
-async function getResults() {
-  if (resCol) {
-    const doc = await resCol.findOne({ _id: 'main' });
-    return doc ? doc.data : {};
-  }
-  return memResults;
-}
-
-async function saveResults(data) {
-  if (resCol) {
-    await resCol.replaceOne({ _id: 'main' }, { _id: 'main', data }, { upsert: true });
-  } else {
-    memResults = data;
-  }
-}
-
-// ── MATCH DATA ────────────────────────────────────────────────────────────────
-const GROUPS = [
-  {g:"A",t:"México · Corea del Sur · Sudáfrica · Chequia",m:[
-    {h:"México",hf:"🇲🇽",a:"Sudáfrica",af:"🇿🇦",j:1,d:"11 Jun",hr:"17:00"},
-    {h:"Corea del Sur",hf:"🇰🇷",a:"Chequia",af:"🇨🇿",j:1,d:"11 Jun",hr:"20:00"},
-    {h:"México",hf:"🇲🇽",a:"Chequia",af:"🇨🇿",j:2,d:"15 Jun",hr:"17:00"},
-    {h:"Corea del Sur",hf:"🇰🇷",a:"Sudáfrica",af:"🇿🇦",j:2,d:"15 Jun",hr:"20:00"},
-    {h:"México",hf:"🇲🇽",a:"Corea del Sur",af:"🇰🇷",j:3,d:"19 Jun",hr:"20:00"},
-    {h:"Sudáfrica",hf:"🇿🇦",a:"Chequia",af:"🇨🇿",j:3,d:"19 Jun",hr:"20:00"}]},
-  {g:"B",t:"Canadá · Suiza · Catar · Bosnia",m:[
-    {h:"Canadá",hf:"🇨🇦",a:"Bosnia",af:"🇧🇦",j:1,d:"12 Jun",hr:"14:00"},
-    {h:"Suiza",hf:"🇨🇭",a:"Catar",af:"🇶🇦",j:1,d:"12 Jun",hr:"17:00"},
-    {h:"Canadá",hf:"🇨🇦",a:"Suiza",af:"🇨🇭",j:2,d:"16 Jun",hr:"17:00"},
-    {h:"Catar",hf:"🇶🇦",a:"Bosnia",af:"🇧🇦",j:2,d:"16 Jun",hr:"20:00"},
-    {h:"Canadá",hf:"🇨🇦",a:"Catar",af:"🇶🇦",j:3,d:"20 Jun",hr:"20:00"},
-    {h:"Suiza",hf:"🇨🇭",a:"Bosnia",af:"🇧🇦",j:3,d:"20 Jun",hr:"20:00"}]},
-  {g:"C",t:"Brasil · Marruecos · Escocia · Haití",m:[
-    {h:"Brasil",hf:"🇧🇷",a:"Marruecos",af:"🇲🇦",j:1,d:"12 Jun",hr:"20:00"},
-    {h:"Escocia",hf:"🏴󠁧󠁢󠁳󠁣󠁴󠁿",a:"Haití",af:"🇭🇹",j:1,d:"13 Jun",hr:"14:00"},
-    {h:"Brasil",hf:"🇧🇷",a:"Escocia",af:"🏴󠁧󠁢󠁳󠁣󠁴󠁿",j:2,d:"17 Jun",hr:"14:00"},
-    {h:"Marruecos",hf:"🇲🇦",a:"Haití",af:"🇭🇹",j:2,d:"17 Jun",hr:"17:00"},
-    {h:"Brasil",hf:"🇧🇷",a:"Haití",af:"🇭🇹",j:3,d:"21 Jun",hr:"20:00"},
-    {h:"Marruecos",hf:"🇲🇦",a:"Escocia",af:"🏴󠁧󠁢󠁳󠁣󠁴󠁿",j:3,d:"21 Jun",hr:"20:00"}]},
-  {g:"D",t:"EE.UU. · Paraguay · Australia · Turquía",m:[
-    {h:"EE.UU.",hf:"🇺🇸",a:"Paraguay",af:"🇵🇾",j:1,d:"13 Jun",hr:"17:00"},
-    {h:"Australia",hf:"🇦🇺",a:"Turquía",af:"🇹🇷",j:1,d:"13 Jun",hr:"20:00"},
-    {h:"EE.UU.",hf:"🇺🇸",a:"Australia",af:"🇦🇺",j:2,d:"17 Jun",hr:"20:00"},
-    {h:"Paraguay",hf:"🇵🇾",a:"Turquía",af:"🇹🇷",j:2,d:"18 Jun",hr:"14:00"},
-    {h:"EE.UU.",hf:"🇺🇸",a:"Turquía",af:"🇹🇷",j:3,d:"22 Jun",hr:"20:00"},
-    {h:"Paraguay",hf:"🇵🇾",a:"Australia",af:"🇦🇺",j:3,d:"22 Jun",hr:"20:00"}]},
-  {g:"E",t:"Alemania · Ecuador · C. de Marfil · Curazao",m:[
-    {h:"Alemania",hf:"🇩🇪",a:"Ecuador",af:"🇪🇨",j:1,d:"14 Jun",hr:"14:00"},
-    {h:"C. de Marfil",hf:"🇨🇮",a:"Curazao",af:"🇨🇼",j:1,d:"14 Jun",hr:"17:00"},
-    {h:"Alemania",hf:"🇩🇪",a:"C. de Marfil",af:"🇨🇮",j:2,d:"18 Jun",hr:"17:00"},
-    {h:"Ecuador",hf:"🇪🇨",a:"Curazao",af:"🇨🇼",j:2,d:"18 Jun",hr:"20:00"},
-    {h:"Alemania",hf:"🇩🇪",a:"Curazao",af:"🇨🇼",j:3,d:"22 Jun",hr:"20:00"},
-    {h:"Ecuador",hf:"🇪🇨",a:"C. de Marfil",af:"🇨🇮",j:3,d:"22 Jun",hr:"20:00"}]},
-  {g:"F",t:"Países Bajos · Japón · Túnez · Suecia",m:[
-    {h:"Países Bajos",hf:"🇳🇱",a:"Japón",af:"🇯🇵",j:1,d:"14 Jun",hr:"20:00"},
-    {h:"Túnez",hf:"🇹🇳",a:"Suecia",af:"🇸🇪",j:1,d:"15 Jun",hr:"14:00"},
-    {h:"Países Bajos",hf:"🇳🇱",a:"Túnez",af:"🇹🇳",j:2,d:"19 Jun",hr:"14:00"},
-    {h:"Japón",hf:"🇯🇵",a:"Suecia",af:"🇸🇪",j:2,d:"19 Jun",hr:"17:00"},
-    {h:"Países Bajos",hf:"🇳🇱",a:"Suecia",af:"🇸🇪",j:3,d:"23 Jun",hr:"20:00"},
-    {h:"Japón",hf:"🇯🇵",a:"Túnez",af:"🇹🇳",j:3,d:"23 Jun",hr:"20:00"}]},
-  {g:"G",t:"Bélgica · Irán · Egipto · Nueva Zelanda",m:[
-    {h:"Bélgica",hf:"🇧🇪",a:"Irán",af:"🇮🇷",j:1,d:"15 Jun",hr:"17:00"},
-    {h:"Egipto",hf:"🇪🇬",a:"Nueva Zelanda",af:"🇳🇿",j:1,d:"15 Jun",hr:"20:00"},
-    {h:"Bélgica",hf:"🇧🇪",a:"Egipto",af:"🇪🇬",j:2,d:"19 Jun",hr:"17:00"},
-    {h:"Irán",hf:"🇮🇷",a:"Nueva Zelanda",af:"🇳🇿",j:2,d:"20 Jun",hr:"14:00"},
-    {h:"Bélgica",hf:"🇧🇪",a:"Nueva Zelanda",af:"🇳🇿",j:3,d:"24 Jun",hr:"20:00"},
-    {h:"Irán",hf:"🇮🇷",a:"Egipto",af:"🇪🇬",j:3,d:"24 Jun",hr:"20:00"}]},
-  {g:"H",t:"España · Uruguay · Arabia Saudita · Cabo Verde",m:[
-    {h:"España",hf:"🇪🇸",a:"Cabo Verde",af:"🇨🇻",j:1,d:"16 Jun",hr:"14:00"},
-    {h:"Uruguay",hf:"🇺🇾",a:"Arabia Saudita",af:"🇸🇦",j:1,d:"16 Jun",hr:"17:00"},
-    {h:"España",hf:"🇪🇸",a:"Arabia Saudita",af:"🇸🇦",j:2,d:"20 Jun",hr:"17:00"},
-    {h:"Uruguay",hf:"🇺🇾",a:"Cabo Verde",af:"🇨🇻",j:2,d:"20 Jun",hr:"20:00"},
-    {h:"España",hf:"🇪🇸",a:"Uruguay",af:"🇺🇾",j:3,d:"24 Jun",hr:"20:00"},
-    {h:"Arabia Saudita",hf:"🇸🇦",a:"Cabo Verde",af:"🇨🇻",j:3,d:"24 Jun",hr:"20:00"}]},
-  {g:"I",t:"Francia · Senegal · Noruega · Irak",m:[
-    {h:"Francia",hf:"🇫🇷",a:"Senegal",af:"🇸🇳",j:1,d:"16 Jun",hr:"20:00"},
-    {h:"Noruega",hf:"🇳🇴",a:"Irak",af:"🇮🇶",j:1,d:"17 Jun",hr:"14:00"},
-    {h:"Francia",hf:"🇫🇷",a:"Noruega",af:"🇳🇴",j:2,d:"21 Jun",hr:"14:00"},
-    {h:"Senegal",hf:"🇸🇳",a:"Irak",af:"🇮🇶",j:2,d:"21 Jun",hr:"17:00"},
-    {h:"Francia",hf:"🇫🇷",a:"Irak",af:"🇮🇶",j:3,d:"25 Jun",hr:"20:00"},
-    {h:"Senegal",hf:"🇸🇳",a:"Noruega",af:"🇳🇴",j:3,d:"25 Jun",hr:"20:00"}]},
-  {g:"J",t:"Argentina · Austria · Argelia · Jordania",m:[
-    {h:"Argentina",hf:"🇦🇷",a:"Jordania",af:"🇯🇴",j:1,d:"17 Jun",hr:"20:00"},
-    {h:"Austria",hf:"🇦🇹",a:"Argelia",af:"🇩🇿",j:1,d:"18 Jun",hr:"14:00"},
-    {h:"Argentina",hf:"🇦🇷",a:"Austria",af:"🇦🇹",j:2,d:"22 Jun",hr:"14:00"},
-    {h:"Argelia",hf:"🇩🇿",a:"Jordania",af:"🇯🇴",j:2,d:"22 Jun",hr:"17:00"},
-    {h:"Argentina",hf:"🇦🇷",a:"Argelia",af:"🇩🇿",j:3,d:"26 Jun",hr:"20:00"},
-    {h:"Austria",hf:"🇦🇹",a:"Jordania",af:"🇯🇴",j:3,d:"26 Jun",hr:"20:00"}]},
-  {g:"K",t:"Portugal · Colombia · Uzbekistán · Congo RD",m:[
-    {h:"Portugal",hf:"🇵🇹",a:"Colombia",af:"🇨🇴",j:1,d:"18 Jun",hr:"20:00"},
-    {h:"Uzbekistán",hf:"🇺🇿",a:"Congo RD",af:"🇨🇩",j:1,d:"19 Jun",hr:"14:00"},
-    {h:"Portugal",hf:"🇵🇹",a:"Uzbekistán",af:"🇺🇿",j:2,d:"23 Jun",hr:"14:00"},
-    {h:"Colombia",hf:"🇨🇴",a:"Congo RD",af:"🇨🇩",j:2,d:"23 Jun",hr:"17:00"},
-    {h:"Portugal",hf:"🇵🇹",a:"Congo RD",af:"🇨🇩",j:3,d:"27 Jun",hr:"20:00"},
-    {h:"Colombia",hf:"🇨🇴",a:"Uzbekistán",af:"🇺🇿",j:3,d:"27 Jun",hr:"20:00"}]},
-  {g:"L",t:"Inglaterra · Croacia · Panamá · Ghana",m:[
-    {h:"Inglaterra",hf:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",a:"Croacia",af:"🇭🇷",j:1,d:"20 Jun",hr:"14:00"},
-    {h:"Panamá",hf:"🇵🇦",a:"Ghana",af:"🇬🇭",j:1,d:"20 Jun",hr:"17:00"},
-    {h:"Inglaterra",hf:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",a:"Panamá",af:"🇵🇦",j:2,d:"24 Jun",hr:"14:00"},
-    {h:"Croacia",hf:"🇭🇷",a:"Ghana",af:"🇬🇭",j:2,d:"24 Jun",hr:"17:00"},
-    {h:"Inglaterra",hf:"🏴󠁧󠁢󠁥󠁮󠁧󠁿",a:"Ghana",af:"🇬🇭",j:3,d:"28 Jun",hr:"20:00"},
-    {h:"Croacia",hf:"🇭🇷",a:"Panamá",af:"🇵🇦",j:3,d:"28 Jun",hr:"20:00"}]}
+// ── Partidos fase de grupos (original) ───────────────────────────────────────
+const GROUP_MATCHES = [
+  // Grupo A
+  {id:'a1',group:'A',home:'México',away:'Sudáfrica',date:'2026-06-11'},
+  {id:'a2',group:'A',home:'Corea del Sur',away:'Chequia',date:'2026-06-11'},
+  {id:'a3',group:'A',home:'México',away:'Corea del Sur',date:'2026-06-15'},
+  {id:'a4',group:'A',home:'Sudáfrica',away:'Chequia',date:'2026-06-15'},
+  {id:'a5',group:'A',home:'México',away:'Chequia',date:'2026-06-19'},
+  {id:'a6',group:'A',home:'Sudáfrica',away:'Corea del Sur',date:'2026-06-19'},
+  // Grupo B
+  {id:'b1',group:'B',home:'Canadá',away:'Catar',date:'2026-06-12'},
+  {id:'b2',group:'B',home:'Suiza',away:'Bosnia',date:'2026-06-12'},
+  {id:'b3',group:'B',home:'Canadá',away:'Suiza',date:'2026-06-16'},
+  {id:'b4',group:'B',home:'Catar',away:'Bosnia',date:'2026-06-16'},
+  {id:'b5',group:'B',home:'Canadá',away:'Bosnia',date:'2026-06-20'},
+  {id:'b6',group:'B',home:'Catar',away:'Suiza',date:'2026-06-20'},
+  // Grupo C
+  {id:'c1',group:'C',home:'Brasil',away:'Marruecos',date:'2026-06-12'},
+  {id:'c2',group:'C',home:'Escocia',away:'Irak',date:'2026-06-12'},
+  {id:'c3',group:'C',home:'Brasil',away:'Escocia',date:'2026-06-16'},
+  {id:'c4',group:'C',home:'Marruecos',away:'Irak',date:'2026-06-16'},
+  {id:'c5',group:'C',home:'Brasil',away:'Irak',date:'2026-06-20'},
+  {id:'c6',group:'C',home:'Marruecos',away:'Escocia',date:'2026-06-20'},
+  // Grupo D
+  {id:'d1',group:'D',home:'Francia',away:'Suecia',date:'2026-06-13'},
+  {id:'d2',group:'D',home:'Congo RD',away:'Turquía',date:'2026-06-13'},
+  {id:'d3',group:'D',home:'Francia',away:'Congo RD',date:'2026-06-17'},
+  {id:'d4',group:'D',home:'Suecia',away:'Turquía',date:'2026-06-17'},
+  {id:'d5',group:'D',home:'Francia',away:'Turquía',date:'2026-06-21'},
+  {id:'d6',group:'D',home:'Congo RD',away:'Suecia',date:'2026-06-21'},
+  // Grupo E
+  {id:'e1',group:'E',home:'España',away:'Cabo Verde',date:'2026-06-13'},
+  {id:'e2',group:'E',home:'Austria',away:'Costa Rica',date:'2026-06-13'},
+  {id:'e3',group:'E',home:'España',away:'Austria',date:'2026-06-17'},
+  {id:'e4',group:'E',home:'Cabo Verde',away:'Costa Rica',date:'2026-06-17'},
+  {id:'e5',group:'E',home:'España',away:'Costa Rica',date:'2026-06-21'},
+  {id:'e6',group:'E',home:'Cabo Verde',away:'Austria',date:'2026-06-21'},
+  // Grupo F
+  {id:'f1',group:'F',home:'Argentina',away:'Jordania',date:'2026-06-14'},
+  {id:'f2',group:'F',home:'Ecuador',away:'Noruega',date:'2026-06-14'},
+  {id:'f3',group:'F',home:'Argentina',away:'Ecuador',date:'2026-06-18'},
+  {id:'f4',group:'F',home:'Jordania',away:'Noruega',date:'2026-06-18'},
+  {id:'f5',group:'F',home:'Argentina',away:'Noruega',date:'2026-06-22'},
+  {id:'f6',group:'F',home:'Jordania',away:'Ecuador',date:'2026-06-22'},
+  // Grupo G
+  {id:'g1',group:'G',home:'EE.UU.',away:'Bolivia',date:'2026-06-14'},
+  {id:'g2',group:'G',home:'Panamá',away:'Egipto',date:'2026-06-14'},
+  {id:'g3',group:'G',home:'EE.UU.',away:'Panamá',date:'2026-06-18'},
+  {id:'g4',group:'G',home:'Bolivia',away:'Egipto',date:'2026-06-18'},
+  {id:'g5',group:'G',home:'EE.UU.',away:'Egipto',date:'2026-06-22'},
+  {id:'g6',group:'G',home:'Bolivia',away:'Panamá',date:'2026-06-22'},
+  // Grupo H
+  {id:'h1',group:'H',home:'Portugal',away:'Rumanía',date:'2026-06-15'},
+  {id:'h2',group:'H',home:'Bélgica',away:'Senegal',date:'2026-06-15'},
+  {id:'h3',group:'H',home:'Portugal',away:'Bélgica',date:'2026-06-19'},
+  {id:'h4',group:'H',home:'Rumanía',away:'Senegal',date:'2026-06-19'},
+  {id:'h5',group:'H',home:'Portugal',away:'Senegal',date:'2026-06-23'},
+  {id:'h6',group:'H',home:'Rumanía',away:'Bélgica',date:'2026-06-23'},
+  // Grupo I
+  {id:'i1',group:'I',home:'Países Bajos',away:'Perú',date:'2026-06-15'},
+  {id:'i2',group:'I',home:'Colombia',away:'Ghana',date:'2026-06-15'},
+  {id:'i3',group:'I',home:'Países Bajos',away:'Colombia',date:'2026-06-19'},
+  {id:'i4',group:'I',home:'Perú',away:'Ghana',date:'2026-06-19'},
+  {id:'i5',group:'I',home:'Países Bajos',away:'Ghana',date:'2026-06-23'},
+  {id:'i6',group:'I',home:'Perú',away:'Colombia',date:'2026-06-23'},
+  // Grupo J
+  {id:'j1',group:'J',home:'Alemania',away:'Arabia Saudita',date:'2026-06-16'},
+  {id:'j2',group:'J',home:'Paraguay',away:'Australia',date:'2026-06-16'},
+  {id:'j3',group:'J',home:'Alemania',away:'Paraguay',date:'2026-06-20'},
+  {id:'j4',group:'J',home:'Arabia Saudita',away:'Australia',date:'2026-06-20'},
+  {id:'j5',group:'J',home:'Alemania',away:'Australia',date:'2026-06-24'},
+  {id:'j6',group:'J',home:'Arabia Saudita',away:'Paraguay',date:'2026-06-24'},
+  // Grupo K
+  {id:'k1',group:'K',home:'Japón',away:'Costa de Marfil',date:'2026-06-16'},
+  {id:'k2',group:'K',home:'Croacia',away:'Costa Rica',date:'2026-06-16'},
+  {id:'k3',group:'K',home:'Japón',away:'Croacia',date:'2026-06-20'},
+  {id:'k4',group:'K',home:'Costa de Marfil',away:'Costa Rica',date:'2026-06-20'},
+  {id:'k5',group:'K',home:'Japón',away:'Costa Rica',date:'2026-06-24'},
+  {id:'k6',group:'K',home:'Costa de Marfil',away:'Croacia',date:'2026-06-24'},
+  // Grupo L
+  {id:'l1',group:'L',home:'Uruguay',away:'Irak',date:'2026-06-17'},
+  {id:'l2',group:'L',home:'Serbia',away:'Argelia',date:'2026-06-17'},
+  {id:'l3',group:'L',home:'Uruguay',away:'Serbia',date:'2026-06-21'},
+  {id:'l4',group:'L',home:'Irak',away:'Argelia',date:'2026-06-21'},
+  {id:'l5',group:'L',home:'Uruguay',away:'Argelia',date:'2026-06-25'},
+  {id:'l6',group:'L',home:'Irak',away:'Serbia',date:'2026-06-25'},
 ];
 
-const ALL_MATCHES = [];
-GROUPS.forEach(g => g.m.forEach((m, i) => ALL_MATCHES.push({ ...m, id: g.g + i })));
+// ── Partidos dieciseisavos ────────────────────────────────────────────────────
+const R32_MATCHES = [
+  {id:'r32_1', round:'Dieciseisavos', home:'Sudáfrica', away:'Canadá', date:'2026-06-28', time:'14:00'},
+  {id:'r32_2', round:'Dieciseisavos', home:'Brasil', away:'Japón', date:'2026-06-29', time:'12:00'},
+  {id:'r32_3', round:'Dieciseisavos', home:'Alemania', away:'Paraguay', date:'2026-06-29', time:'15:30'},
+  {id:'r32_4', round:'Dieciseisavos', home:'Países Bajos', away:'Marruecos', date:'2026-06-29', time:'20:00'},
+  {id:'r32_5', round:'Dieciseisavos', home:'Costa de Marfil', away:'Noruega', date:'2026-06-30', time:'12:00'},
+  {id:'r32_6', round:'Dieciseisavos', home:'Francia', away:'Suecia', date:'2026-06-30', time:'16:00'},
+  {id:'r32_7', round:'Dieciseisavos', home:'México', away:'Ecuador', date:'2026-06-30', time:'20:00'},
+  {id:'r32_8', round:'Dieciseisavos', home:'Inglaterra', away:'RD Congo', date:'2026-07-01', time:'11:00'},
+  {id:'r32_9', round:'Dieciseisavos', home:'Bélgica', away:'Senegal', date:'2026-07-01', time:'15:00'},
+  {id:'r32_10', round:'Dieciseisavos', home:'EE.UU.', away:'Bosnia', date:'2026-07-01', time:'19:00'},
+  {id:'r32_11', round:'Dieciseisavos', home:'España', away:'Austria', date:'2026-07-02', time:'14:00'},
+  {id:'r32_12', round:'Dieciseisavos', home:'Portugal', away:'Croacia', date:'2026-07-02', time:'18:00'},
+  {id:'r32_13', round:'Dieciseisavos', home:'Suiza', away:'Argelia', date:'2026-07-02', time:'22:00'},
+  {id:'r32_14', round:'Dieciseisavos', home:'Australia', away:'Egipto', date:'2026-07-03', time:'13:00'},
+  {id:'r32_15', round:'Dieciseisavos', home:'Argentina', away:'Cabo Verde', date:'2026-07-03', time:'17:00'},
+  {id:'r32_16', round:'Dieciseisavos', home:'Colombia', away:'Ghana', date:'2026-07-03', time:'20:30'},
+];
 
-function calcPts(pred, res) {
-  if (!pred || !res) return null;
-  if (pred.h === '' || pred.h == null || pred.a === '' || pred.a == null) return null;
-  if (res.h === '' || res.h == null || res.a === '' || res.a == null) return null;
-  const ph = +pred.h, pa = +pred.a, rh = +res.h, ra = +res.a;
-  if (isNaN(ph)||isNaN(pa)||isNaN(rh)||isNaN(ra)) return null;
-  if (ph===rh && pa===ra) return 3;
-  const r = (a,b) => a>b?'H':a<b?'A':'E';
-  return r(ph,pa)===r(rh,ra) ? 1 : 0;
+// ── Fases eliminatorias (octavos a final) — definidas por admin ──────────────
+const KNOCKOUT_ROUNDS = [
+  { id: 'r16', name: 'Octavos de final', matches: 8 },
+  { id: 'qf', name: 'Cuartos de final', matches: 4 },
+  { id: 'sf', name: 'Semifinales', matches: 2 },
+  { id: 'third', name: 'Tercer lugar', matches: 1 },
+  { id: 'final', name: 'Final', matches: 1 },
+];
+
+// ── Scoring ───────────────────────────────────────────────────────────────────
+function calcPoints(pred, official) {
+  if (!pred || !official) return null;
+  const ph = parseInt(pred.h), pa = parseInt(pred.a);
+  const oh = parseInt(official.h), oa = parseInt(official.a);
+  if (isNaN(ph)||isNaN(pa)||isNaN(oh)||isNaN(oa)) return null;
+  if (ph===oh && pa===oa) return 3;
+  const predResult = ph>pa?'H':ph<pa?'A':'D';
+  const offResult = oh>oa?'H':oh<oa?'A':'D';
+  if (predResult===offResult) return 1;
+  return 0;
 }
 
-// ── ROUTES ────────────────────────────────────────────────────────────────────
-
-app.get('/api/matches', (req, res) => res.json(GROUPS));
-
-app.get('/api/health', async (req, res) => {
-  const all = await getAllParticipants();
-  const rez = await getResults();
-  res.json({ ok:true, db: col?'MongoDB':'memory', participants:all.length, results:Object.keys(rez).length });
+// ── Routes ────────────────────────────────────────────────────────────────────
+app.get('/api/health', async (_req, res) => {
+  const data = await getData();
+  res.json({ ok: true, db: db ? 'MongoDB' : 'memory', participants: Object.keys(data.participants||{}).length, results: Object.keys(data.results||{}).length });
 });
 
-// Check if name exists
-app.get('/api/check/:name', async (req, res) => {
-  try {
-    const key = normKey(req.params.name);
-    const p = await getParticipant(key);
-    res.json({ exists: !!p, createdAt: p ? p.createdAt : null });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+app.get('/api/matches', (_req, res) => {
+  res.json({ groups: GROUP_MATCHES, r32: R32_MATCHES, knockoutRounds: KNOCKOUT_ROUNDS });
 });
 
-// Register new participant with PIN
+// Register / login
 app.post('/api/register', async (req, res) => {
-  try {
-    const { name, pin } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Nombre requerido' });
-    if (!pin || !/^\d{5}$/.test(pin)) return res.status(400).json({ error: 'PIN debe ser de 5 dígitos' });
-    const key = normKey(name.trim());
-    const existing = await getParticipant(key);
-    if (existing) return res.status(409).json({ error: 'Ese nombre ya está registrado', createdAt: existing.createdAt });
-    const newP = {
-      name: name.trim(),
-      pin,
-      predictions: {},
-      createdAt: new Date().toISOString(),
-      savedAt: new Date().toISOString()
-    };
-    await upsertParticipant(key, newP);
-    res.json({ ok: true, key });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  const { name, pin } = req.body;
+  if (!name || !pin || pin.length !== 5) return res.status(400).json({ error: 'Nombre y PIN de 5 dígitos requeridos' });
+  const data = await getData();
+  if (data.participants[name]) return res.status(409).json({ error: 'Ya registrado' });
+  data.participants[name] = { pin, predictions: {}, knockoutPredictions: {}, locked: {}, knockoutLocked: {}, createdAt: new Date().toISOString() };
+  await setData({ participants: data.participants });
+  res.json({ ok: true });
 });
 
-// Login with name + PIN
 app.post('/api/login', async (req, res) => {
-  try {
-    const { name, pin } = req.body;
-    if (!name || !pin) return res.status(400).json({ error: 'Nombre y PIN requeridos' });
-    const key = normKey(name.trim());
-    const p = await getParticipant(key);
-    if (!p) return res.status(404).json({ error: 'Nombre no encontrado' });
-    if (p.pin !== pin) return res.status(401).json({ error: 'PIN incorrecto' });
-    const { pin: _, ...safe } = p;
-    res.json({ ok: true, participant: safe });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  const { name, pin } = req.body;
+  const data = await getData();
+  const p = data.participants[name];
+  if (!p) return res.status(404).json({ error: 'No encontrado' });
+  if (p.pin !== pin) return res.status(401).json({ error: 'PIN incorrecto' });
+  res.json({ ok: true, predictions: p.predictions || {}, knockoutPredictions: p.knockoutPredictions || {}, locked: p.locked || {}, knockoutLocked: p.knockoutLocked || {} });
 });
 
-// Save predictions (requires PIN verification)
+// Save group predictions
 app.post('/api/save', async (req, res) => {
-  try {
-    const { name, pin, predictions } = req.body;
-    if (!name || !pin) return res.status(400).json({ error: 'Nombre y PIN requeridos' });
-    const key = normKey(name.trim());
-    const p = await getParticipant(key);
-    if (!p) return res.status(404).json({ error: 'Participante no encontrado' });
-    if (p.pin !== pin) return res.status(401).json({ error: 'PIN incorrecto' });
-
-    // Merge predictions — never overwrite locked
-    const merged = { ...p.predictions };
-    if (predictions && typeof predictions === 'object') {
-      Object.keys(predictions).forEach(id => {
-        if (!merged[id] || !merged[id].locked) {
-          merged[id] = predictions[id];
-        }
-      });
-    }
-
-    await upsertParticipant(key, {
-      ...p,
-      predictions: merged,
-      savedAt: new Date().toISOString()
-    });
-
-    const locked = Object.values(merged).filter(x => x && x.locked).length;
-    const filled = Object.values(merged).filter(x => x && x.h !== '' && x.a !== '').length;
-    res.json({ ok: true, filled, locked });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  const { name, pin, predictions, locked } = req.body;
+  const data = await getData();
+  const p = data.participants[name];
+  if (!p || p.pin !== pin) return res.status(401).json({ error: 'No autorizado' });
+  p.predictions = predictions;
+  p.locked = locked;
+  await setData({ participants: data.participants });
+  res.json({ ok: true });
 });
 
-// Leaderboard (public)
-app.get('/api/leaderboard', async (req, res) => {
-  try {
-    const all = await getAllParticipants();
-    const rez = await getResults();
-    const rows = all.map(p => {
-      const preds = p.predictions || {};
-      let pts=0, exact=0, filled=0, locked=0;
-      ALL_MATCHES.forEach(m => {
-        const pred = preds[m.id];
-        const r = rez[m.id];
-        if (pred && pred.h!=='' && pred.a!=='') filled++;
-        if (pred && pred.locked) locked++;
-        const pt = calcPts(pred, r);
-        if (pt !== null) { pts += pt; if (pt===3) exact++; }
-      });
-      return { name: p.name, pts, exact, filled, locked, savedAt: p.savedAt };
-    });
-    rows.sort((a,b) => b.pts-a.pts || b.exact-a.exact || b.locked-a.locked);
-    res.json({ rows, resultsCount: Object.keys(rez).length });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+// Save knockout predictions
+app.post('/api/save-knockout', async (req, res) => {
+  const { name, pin, knockoutPredictions, knockoutLocked } = req.body;
+  const data = await getData();
+  const p = data.participants[name];
+  if (!p || p.pin !== pin) return res.status(401).json({ error: 'No autorizado' });
+  p.knockoutPredictions = knockoutPredictions;
+  p.knockoutLocked = knockoutLocked;
+  await setData({ participants: data.participants });
+  res.json({ ok: true });
 });
 
-// Admin: verify password
+// Admin verify
 app.post('/api/admin-verify', (req, res) => {
   res.json({ ok: req.body.password === ADMIN_PASS });
 });
 
+// Admin: save group results
+app.post('/api/results', async (req, res) => {
+  if (req.headers['x-admin-pass'] !== ADMIN_PASS && req.body.password !== ADMIN_PASS)
+    return res.status(403).json({ error: 'No autorizado' });
+  const data = await getData();
+  data.results = { ...data.results, ...req.body.results };
+  await setData({ results: data.results });
+  res.json({ ok: true });
+});
+
+// Admin: save knockout results
+app.post('/api/knockout-results', async (req, res) => {
+  if (req.body.password !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
+  const data = await getData();
+  data.knockoutResults = { ...data.knockoutResults, ...req.body.results };
+  await setData({ knockoutResults: data.knockoutResults });
+  res.json({ ok: true });
+});
+
+// Admin: define knockout matches (octavos, cuartos, etc.)
+app.post('/api/knockout-matches', async (req, res) => {
+  if (req.body.password !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
+  const data = await getData();
+  data.knockoutMatches = { ...data.knockoutMatches, ...req.body.matches };
+  await setData({ knockoutMatches: data.knockoutMatches });
+  res.json({ ok: true });
+});
+
 // Admin: get all data
 app.get('/api/admin/data', async (req, res) => {
-  const auth = req.headers['x-admin-pass'];
-  if (auth !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
-  try {
-    const all = await getAllParticipants();
-    const rez = await getResults();
-    const safe = all.map(({ pin, ...rest }) => rest);
-    res.json({ participants: safe, results: rez });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  if (req.headers['x-admin-pass'] !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
+  const data = await getData();
+  
+  // Calculate scores for each participant
+  const scores = {};
+  for (const [name, p] of Object.entries(data.participants || {})) {
+    let groupPts = 0, knockoutPts = 0;
+    // Group stage
+    for (const [mid, pred] of Object.entries(p.predictions || {})) {
+      const off = data.results[mid];
+      const pts = calcPoints(pred, off);
+      if (pts !== null) groupPts += pts;
+    }
+    // R32 + knockout
+    for (const [mid, pred] of Object.entries(p.knockoutPredictions || {})) {
+      const off = data.knockoutResults[mid];
+      const pts = calcPoints(pred, off);
+      if (pts !== null) knockoutPts += pts;
+    }
+    scores[name] = { groupPts, knockoutPts, total: groupPts + knockoutPts, createdAt: p.createdAt, submitted: Object.keys(p.locked||{}).length };
+  }
+  
+  res.json({ participants: data.participants, results: data.results, knockoutResults: data.knockoutResults, knockoutMatches: data.knockoutMatches, scores });
 });
 
-// Admin: save official results
-app.post('/api/results', async (req, res) => {
-  const { password, results: newResults } = req.body;
-  if (password !== ADMIN_PASS) return res.status(403).json({ error: 'No autorizado' });
-  try {
-    await saveResults(newResults || {});
-    res.json({ ok: true, count: Object.keys(newResults||{}).length });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+// Public scores
+app.get('/api/scores', async (_req, res) => {
+  const data = await getData();
+  const scores = [];
+  for (const [name, p] of Object.entries(data.participants || {})) {
+    let groupPts = 0, knockoutPts = 0;
+    for (const [mid, pred] of Object.entries(p.predictions || {})) {
+      const off = data.results[mid];
+      const pts = calcPoints(pred, off);
+      if (pts !== null) groupPts += pts;
+    }
+    for (const [mid, pred] of Object.entries(p.knockoutPredictions || {})) {
+      const off = data.knockoutResults[mid];
+      const pts = calcPoints(pred, off);
+      if (pts !== null) knockoutPts += pts;
+    }
+    scores.push({ name, groupPts, knockoutPts, total: groupPts + knockoutPts });
+  }
+  scores.sort((a, b) => b.total - a.total);
+  res.json({ scores, knockoutMatches: data.knockoutMatches || {}, knockoutResults: data.knockoutResults || {} });
 });
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+app.listen(PORT, async () => {
+  await connectDB();
+  console.log(`Server running on port ${PORT}`);
 });
-
-initDB().then(() => {
-  app.listen(PORT, () => console.log(`Quiniela Doña Corneta — puerto ${PORT} — DB: ${col?'MongoDB':'memoria'}`));
-});
-// temp debug
-app.get('/api/debug-admin', (req, res) => {
-  res.json({ pass: ADMIN_PASS, env: process.env.ADMIN_PASS });
-});
-// miércoles,  3 de junio de 2026, 11:32:34 EST
