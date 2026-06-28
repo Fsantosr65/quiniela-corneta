@@ -150,10 +150,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div id="admin-participants"></div>
     </div>
     <div class="card">
-      <h2 style="margin-bottom:10px">Resultados Oficiales — Grupos</h2>
-      <div id="admin-group-matches"></div>
-    </div>
-    <div class="card">
       <h2 style="margin-bottom:10px">Dieciseisavos — Resultados Oficiales</h2>
       <div id="admin-r32-results"></div>
     </div>
@@ -422,6 +418,7 @@ async function adminLogin() {
     if(!r.ok){toast('Contraseña incorrecta','err');return;}
     document.getElementById('admin-login-card').style.display='none';
     document.getElementById('admin-panel').style.display='block';
+    await loadMatches();
     loadAdmin();
   } catch(e){toast('Error','err');}
 }
@@ -438,24 +435,7 @@ async function loadAdmin() {
     pHtml+='</table>';
     document.getElementById('admin-participants').innerHTML=pHtml;
 
-    // Group results
-    const groupsMap = {};
-    allMatches.groups.forEach(m=>{if(!groupsMap[m.group])groupsMap[m.group]=[];groupsMap[m.group].push(m);});
-    let grHtml='';
-    for(const [g, matches] of Object.entries(groupsMap)){
-      grHtml+=`<div class="ko-round-header">Grupo ${g}</div>`;
-      matches.forEach(m=>{
-        const r=data.results[m.id]||{};
-        grHtml+=`<div class="admin-match">
-          <span style="font-size:13px;flex:1">${flag(m.home)} ${m.home}</span>
-          <input class="admin-input" type="tel" maxlength="2" id="gr-h-${m.id}" value="${r.h||''}" placeholder="–">
-          <span style="color:#555">:</span>
-          <input class="admin-input" type="tel" maxlength="2" id="gr-a-${m.id}" value="${r.a||''}" placeholder="–">
-          <span style="font-size:13px;flex:1;text-align:right">${m.away} ${flag(m.away)}</span>
-        </div>`;
-      });
-    }
-    document.getElementById('admin-group-matches').innerHTML=grHtml;
+    
 
     // R32 results
     let r32Html='';
@@ -500,12 +480,7 @@ async function loadAdmin() {
 }
 
 async function adminSaveAll() {
-  // Group results
   const grResults={};
-  allMatches.groups.forEach(m=>{
-    const h=document.getElementById('gr-h-'+m.id), a=document.getElementById('gr-a-'+m.id);
-    if(h&&a&&h.value!==''&&a.value!=='') grResults[m.id]={h:h.value,a:a.value};
-  });
   // R32 results
   const krResults={};
   allMatches.r32.forEach(m=>{
